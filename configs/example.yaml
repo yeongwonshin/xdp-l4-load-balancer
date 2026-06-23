@@ -1,0 +1,25 @@
+services:
+  - name: web-vip
+    vip: 10.10.0.100
+    port: 80
+    protocol: tcp
+    mode: dsr
+    backends:
+      - name: web-1
+        ip: 10.10.0.11
+        mac: "02:42:0a:0a:00:0b"
+        ifname: "eth0"
+      - name: web-2
+        ip: 10.10.0.12
+        mac: "02:42:0a:0a:00:0c"
+        ifname: "eth0"
+  - name: dns-vip
+    vip: 10.10.0.53
+    port: 53
+    protocol: udp
+    mode: dsr
+    backends:
+      - name: dns-1
+        ip: 10.10.0.21
+        mac: "02:42:0a:0a:00:15"
+        ifname: "eth0"

@@ -1,0 +1,31 @@
+{
+  "title": "XDP L4 Load Balancer",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Backend packets/s",
+      "targets": [
+        { "expr": "rate(xdp_l4lb_backend_packets_total[1m])", "legendFormat": "{{service}}/{{backend}}" }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Backend bytes/s",
+      "targets": [
+        { "expr": "rate(xdp_l4lb_backend_bytes_total[1m])", "legendFormat": "{{service}}/{{backend}}" }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "New flows/s",
+      "targets": [
+        { "expr": "rate(xdp_l4lb_backend_flows_total[1m])", "legendFormat": "{{service}}/{{backend}}" }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 }
+    }
+  ]
+}

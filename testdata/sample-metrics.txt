@@ -1,0 +1,4 @@
+# HELP xdp_l4lb_backend_packets_total Packets redirected to backend by the XDP datapath.
+# TYPE xdp_l4lb_backend_packets_total counter
+xdp_l4lb_backend_packets_total{backend="web-1",backend_id="0",ip="10.10.0.11",service="web-vip"} 1024
+xdp_l4lb_backend_packets_total{backend="web-2",backend_id="1",ip="10.10.0.12",service="web-vip"} 998
