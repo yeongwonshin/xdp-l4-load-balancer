@@ -11,11 +11,26 @@
 #define L4_PROTO_UDP 17
 
 #define LB_FLAG_DSR 0x1
-#define LB_FLAG_SNAT 0x2 /* reserved for future NAT mode */
+
+#define IPV4_FLAG_MORE_FRAGMENTS 0x2000
+#define IPV4_FRAGMENT_OFFSET_MASK 0x1fff
+
+enum datapath_event {
+    DATAPATH_EVENT_PACKETS_SEEN = 0,
+    DATAPATH_EVENT_NON_IPV4,
+    DATAPATH_EVENT_MALFORMED,
+    DATAPATH_EVENT_FRAGMENTED,
+    DATAPATH_EVENT_UNSUPPORTED_L4,
+    DATAPATH_EVENT_SERVICE_MISS,
+    DATAPATH_EVENT_FLOW_INSERT_FAILURE,
+    DATAPATH_EVENT_BACKEND_MISS,
+    DATAPATH_EVENT_REDIRECT_REQUESTED,
+    DATAPATH_EVENT_MAX,
+};
 
 struct service_key {
-    __u32 vip;      /* network byte order */
-    __u16 port;     /* network byte order */
+    __u32 vip;      /* network byte order in map memory */
+    __u16 port;     /* network byte order in map memory */
     __u8 proto;     /* TCP=6, UDP=17 */
     __u8 pad;
 };
@@ -28,10 +43,10 @@ struct service_value {
 };
 
 struct backend_value {
-    __u32 ip;       /* network byte order, kept for metrics / future NAT */
+    __u32 ip;       /* network byte order in map memory */
     __u32 ifindex;  /* egress interface index */
-    __u8 mac[6];    /* backend destination MAC */
-    __u8 pad[2];
+    __u8 dst_mac[6];
+    __u8 src_mac[6];
 };
 
 struct backend_stats {
@@ -53,12 +68,6 @@ struct flow_value {
     __u32 backend_id;
     __u32 pad;
     __u64 last_seen_ns;
-};
-
-struct lb_config {
-    __u8 src_mac[6];
-    __u8 pad[2];
-    __u32 default_action; /* XDP_PASS by default */
 };
 
 #endif /* __XDP_L4LB_COMMON_H */
