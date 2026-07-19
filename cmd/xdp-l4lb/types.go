@@ -6,6 +6,9 @@ const (
 	protoTCP  = 6
 	protoUDP  = 17
 	lbFlagDSR = 0x1
+
+	maxServices = 4096
+	maxBackends = 65536
 )
 
 type serviceKey struct {
@@ -25,8 +28,8 @@ type serviceValue struct {
 type backendValue struct {
 	IP      uint32
 	IfIndex uint32
-	MAC     [6]byte
-	Pad     [2]byte
+	DstMAC  [6]byte
+	SrcMAC  [6]byte
 }
 
 type backendStats struct {
@@ -35,16 +38,12 @@ type backendStats struct {
 	Flows   uint64
 }
 
-type lbConfig struct {
-	SrcMAC        [6]byte
-	Pad           [2]byte
-	DefaultAction uint32
-}
-
-func ipv4ToU32NetworkOrder(ip4 []byte) uint32 {
-	return binary.BigEndian.Uint32(ip4)
+func ipv4ToNetworkOrder(ip4 []byte) uint32 {
+	return binary.NativeEndian.Uint32(ip4)
 }
 
 func portToNetworkOrder(port uint16) uint16 {
-	return (port<<8)&0xff00 | port>>8
+	var wire [2]byte
+	binary.BigEndian.PutUint16(wire[:], port)
+	return binary.NativeEndian.Uint16(wire[:])
 }
