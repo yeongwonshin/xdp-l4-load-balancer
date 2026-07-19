@@ -1,58 +1,89 @@
 # BPF Maps
 
-## `services`
+## services
 
-Type: `BPF_MAP_TYPE_HASH`
+Type: `bpf_map_type_hash`
 
-Key: `service_key`
+Maximum entries: 4096
 
-- `vip`: IPv4 VIP, network byte order
-- `port`: TCP/UDP destination port, network byte order
-- `proto`: `6` TCP or `17` UDP
+Key fields:
 
-Value: `service_value`
+- `vip` as IPv4 network-order bytes
+- `port` as TCP or UDP destination port network-order bytes
+- `proto` as 6 for TCP or 17 for UDP
 
-- `backend_start`: first backend ID for this service
-- `backend_count`: number of backends
-- `flags`: currently `LB_FLAG_DSR`
+Value fields:
 
-## `backends`
+- `backend_start` as the first backend identifier for the service
+- `backend_count` as the size of the contiguous backend range
+- `flags` with the DSR flag
 
-Type: `BPF_MAP_TYPE_ARRAY`
+The control plane rejects duplicate service keys. The datapath validates that the complete backend range fits within the backend array before selecting an entry.
 
-Key: backend ID
+## backends
 
-Value:
+Type: `bpf_map_type_array`
 
-- backend IPv4 address
+Maximum entries: 65536
+
+Value fields:
+
+- backend IPv4 address for labels and future forwarding modes
 - egress interface index
 - backend destination MAC
+- egress interface source MAC
 
-## `backend_stats`
+The current DSR datapath uses the interface index and both MAC addresses. It does not use the backend IP to rewrite packets.
 
-Type: `BPF_MAP_TYPE_ARRAY`
+## backend_stats
 
-Counters:
+Type: `bpf_map_type_percpu_hash`
 
-- packets
-- bytes
-- flows
+Maximum entries: 65536
 
-## `flow_table`
+Counters per backend and CPU:
 
-Type: `BPF_MAP_TYPE_LRU_HASH`
+- packets selected for redirect
+- bytes selected for redirect
+- newly inserted flows
 
-Key: 5-tuple
+The userspace collector aggregates all possible CPU values for each configured backend.
 
-Value:
+## flow_table
 
-- selected backend ID
-- last seen timestamp
+Type: `bpf_map_type_lru_hash`
 
-LRU map을 사용하므로 오래된 flow entry는 pressure 상황에서 자동 eviction될 수 있습니다.
+Maximum entries: 1048576
 
-## `lb_config`
+Key fields:
 
-Type: `BPF_MAP_TYPE_ARRAY`
+- source IPv4 address
+- destination IPv4 address
+- source port
+- destination port
+- protocol
 
-Index `0`에 load balancer interface MAC과 기본 action을 저장합니다.
+Value fields:
+
+- selected backend identifier
+- last seen monotonic timestamp in nanoseconds
+
+The timestamp is updated for existing flows but is not currently used for explicit expiration. LRU pressure can evict old entries.
+
+## datapath_stats
+
+Type: `bpf_map_type_percpu_array`
+
+Keys represent fixed datapath events:
+
+- `packets_seen`
+- `non_ipv4`
+- `malformed`
+- `fragmented`
+- `unsupported_l4`
+- `service_miss`
+- `flow_insert_failure`
+- `backend_miss`
+- `redirect_requested`
+
+The Prometheus collector exports these values through `xdp_l4lb_datapath_events_total` with an `event` label.
