@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/cilium/ebpf"
 )
 
 type BackendLabel struct {
@@ -13,43 +15,41 @@ type BackendLabel struct {
 	IP      string
 }
 
-func ProgramMaps(objs *bpfObjects, cfg *Config, lbMAC net.HardwareAddr) error {
-	var localMAC [6]byte
-	copy(localMAC[:], lbMAC)
-
-	// XDP_PASS is 2; kept configurable for future drop/pass policy support.
-	if err := objs.LbConfig.Update(uint32(0), lbConfig{SrcMAC: localMAC, DefaultAction: 2}, 0); err != nil {
-		return fmt.Errorf("update lb_config: %w", err)
+func ProgramMaps(objs *bpfObjects, cfg *Config) error {
+	possibleCPUs, err := ebpf.PossibleCPU()
+	if err != nil {
+		return fmt.Errorf("detect possible cpus: %w", err)
 	}
+	zeroStats := make([]backendStats, possibleCPUs)
 
 	var backendID uint32
 	for _, svc := range cfg.Services {
 		start := backendID
-		for _, be := range svc.Backends {
-			val, err := backendToMapValue(be)
+		for _, backend := range svc.Backends {
+			value, err := backendToMapValue(backend)
 			if err != nil {
-				return err
+				return fmt.Errorf("service %q backend %q: %w", svc.Name, backend.Name, err)
 			}
-			if err := objs.Backends.Update(backendID, val, 0); err != nil {
+			if err := objs.Backends.Update(backendID, value, ebpf.UpdateAny); err != nil {
 				return fmt.Errorf("update backend %d: %w", backendID, err)
 			}
-			if err := objs.BackendStats.Update(backendID, backendStats{}, 0); err != nil {
-				return fmt.Errorf("clear backend_stats %d: %w", backendID, err)
+			if err := objs.BackendStats.Update(backendID, zeroStats, ebpf.UpdateNoExist); err != nil {
+				return fmt.Errorf("initialize backend stats %d: %w", backendID, err)
 			}
 			backendID++
 		}
 
-		svcKey, err := serviceToMapKey(svc)
+		key, err := serviceToMapKey(svc)
 		if err != nil {
-			return err
+			return fmt.Errorf("service %q: %w", svc.Name, err)
 		}
-		svcVal := serviceValue{
+		value := serviceValue{
 			BackendStart: start,
 			BackendCount: uint32(len(svc.Backends)),
 			Flags:        lbFlagDSR,
 		}
-		if err := objs.Services.Update(svcKey, svcVal, 0); err != nil {
-			return fmt.Errorf("update service %s: %w", svc.Name, err)
+		if err := objs.Services.Update(key, value, ebpf.UpdateNoExist); err != nil {
+			return fmt.Errorf("update service %q: %w", svc.Name, err)
 		}
 	}
 	return nil
@@ -58,61 +58,99 @@ func ProgramMaps(objs *bpfObjects, cfg *Config, lbMAC net.HardwareAddr) error {
 func serviceToMapKey(svc ServiceConfig) (serviceKey, error) {
 	ip := net.ParseIP(svc.VIP).To4()
 	if ip == nil {
-		return serviceKey{}, fmt.Errorf("invalid VIP %q", svc.VIP)
+		return serviceKey{}, fmt.Errorf("invalid vip %q", svc.VIP)
 	}
 
-	proto := uint8(protoTCP)
-	if strings.ToLower(svc.Protocol) == "udp" {
-		proto = protoUDP
+	var protocol uint8
+	switch strings.ToLower(svc.Protocol) {
+	case "tcp":
+		protocol = protoTCP
+	case "udp":
+		protocol = protoUDP
+	default:
+		return serviceKey{}, fmt.Errorf("invalid protocol %q", svc.Protocol)
 	}
 
 	return serviceKey{
-		VIP:   ipv4ToU32NetworkOrder(ip),
+		VIP:   ipv4ToNetworkOrder(ip),
 		Port:  portToNetworkOrder(svc.Port),
-		Proto: proto,
+		Proto: protocol,
 	}, nil
 }
 
-func backendToMapValue(be BackendConfig) (backendValue, error) {
-	ip := net.ParseIP(be.IP).To4()
+func backendToMapValue(backend BackendConfig) (backendValue, error) {
+	ip := net.ParseIP(backend.IP).To4()
 	if ip == nil {
-		return backendValue{}, fmt.Errorf("invalid backend IP %q", be.IP)
+		return backendValue{}, fmt.Errorf("invalid backend ip %q", backend.IP)
 	}
 
-	mac, err := net.ParseMAC(be.MAC)
+	destinationMAC, err := net.ParseMAC(backend.MAC)
+	if err != nil || len(destinationMAC) != 6 {
+		return backendValue{}, fmt.Errorf("parse backend mac %q", backend.MAC)
+	}
+
+	egress, err := resolveEgressInterface(backend)
 	if err != nil {
-		return backendValue{}, fmt.Errorf("parse backend MAC %q: %w", be.MAC, err)
+		return backendValue{}, err
+	}
+	if len(egress.HardwareAddr) != 6 {
+		return backendValue{}, fmt.Errorf("egress interface %q has no ethernet mac", egress.Name)
 	}
 
-	ifindex := be.IfIndex
-	if ifindex == 0 {
-		iface, err := net.InterfaceByName(be.IfName)
-		if err != nil {
-			return backendValue{}, fmt.Errorf("lookup backend egress ifname %q: %w", be.IfName, err)
-		}
-		ifindex = iface.Index
-	}
-
-	var macBytes [6]byte
-	copy(macBytes[:], mac)
+	var destination [6]byte
+	copy(destination[:], destinationMAC)
+	var source [6]byte
+	copy(source[:], egress.HardwareAddr)
 
 	return backendValue{
-		IP:      ipv4ToU32NetworkOrder(ip),
-		IfIndex: uint32(ifindex),
-		MAC:     macBytes,
+		IP:      ipv4ToNetworkOrder(ip),
+		IfIndex: uint32(egress.Index),
+		DstMAC:  destination,
+		SrcMAC:  source,
 	}, nil
+}
+
+func resolveEgressInterface(backend BackendConfig) (*net.Interface, error) {
+	var byName *net.Interface
+	var byIndex *net.Interface
+	var err error
+
+	if backend.IfName != "" {
+		byName, err = net.InterfaceByName(backend.IfName)
+		if err != nil {
+			return nil, fmt.Errorf("lookup egress ifname %q: %w", backend.IfName, err)
+		}
+	}
+	if backend.IfIndex > 0 {
+		byIndex, err = net.InterfaceByIndex(backend.IfIndex)
+		if err != nil {
+			return nil, fmt.Errorf("lookup egress ifindex %d: %w", backend.IfIndex, err)
+		}
+	}
+
+	if byName != nil && byIndex != nil && byName.Index != byIndex.Index {
+		return nil, fmt.Errorf("ifname %q and ifindex %d refer to different interfaces", backend.IfName, backend.IfIndex)
+	}
+	if byName != nil {
+		return byName, nil
+	}
+	if byIndex != nil {
+		return byIndex, nil
+	}
+	return nil, fmt.Errorf("missing egress interface")
 }
 
 func BackendLabels(cfg *Config) []BackendLabel {
 	labels := make([]BackendLabel, 0)
 	var id uint32
 	for _, svc := range cfg.Services {
-		for _, be := range svc.Backends {
-			name := be.Name
-			if name == "" {
-				name = be.IP
-			}
-			labels = append(labels, BackendLabel{ID: id, Service: svc.Name, Name: name, IP: be.IP})
+		for _, backend := range svc.Backends {
+			labels = append(labels, BackendLabel{
+				ID:      id,
+				Service: svc.Name,
+				Name:    backend.Name,
+				IP:      backend.IP,
+			})
 			id++
 		}
 	}
