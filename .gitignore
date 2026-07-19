@@ -1,7 +1,10 @@
 /bin/
 *.o
+*.test
+coverage.out
 cmd/xdp-l4lb/bpf_bpf*.go
 cmd/xdp-l4lb/bpf_bpf*.o
+deploy/.env
 .vscode/
 .idea/
 .DS_Store
