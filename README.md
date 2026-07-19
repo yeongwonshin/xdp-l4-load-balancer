@@ -4,6 +4,14 @@ An IPv4 Layer 4 load balancer that makes TCP and UDP forwarding decisions in XDP
 
 The datapath implements direct server return at Layer 2. It keeps the VIP as the destination IP, rewrites the Ethernet destination MAC to the selected backend, rewrites the Ethernet source MAC to the selected egress interface MAC, and redirects the frame through that interface. Each backend must own the VIP on a loopback or dummy interface and must not answer ARP for it on the service network.
 
+Detailed design, map layouts, deployment guidance, troubleshooting, and test procedures are maintained separately:
+
+- [Architecture](docs/architecture.md)
+- [BPF maps](docs/maps.md)
+- [Operations and troubleshooting](docs/operations.md)
+- [Lab topology](docs/lab-topology.md)
+- [Test plan](docs/test-plan.md)
+
 ## What is included
 
 - Ethernet and up to two VLAN header parsing
@@ -194,10 +202,3 @@ Prometheus and Grafana bind to localhost by default. Grafana automatically provi
 - The flow table is LRU-based and entries may be evicted under pressure
 - XDP redirect success must be verified outside the program
 
-Detailed design, map layouts, deployment guidance, troubleshooting, and test procedures are maintained separately:
-
-- [Architecture](docs/architecture.md)
-- [BPF maps](docs/maps.md)
-- [Operations and troubleshooting](docs/operations.md)
-- [Lab topology](docs/lab-topology.md)
-- [Test plan](docs/test-plan.md)
