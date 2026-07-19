@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IFACE=${IFACE:-eth0}
-CONFIG=${CONFIG:-configs/example.yaml}
-XDP_MODE=${XDP_MODE:-generic}
+iface=${IFACE:-eth0}
+config=${CONFIG:-configs/example.yaml}
+xdp_mode=${XDP_MODE:-generic}
+metrics_addr=${METRICS_ADDR:-:2112}
 
 make build
-sudo ./bin/xdp-l4lb -iface "$IFACE" -config "$CONFIG" -xdp-mode "$XDP_MODE" -metrics :2112
+exec sudo ./bin/xdp-l4lb \
+  -iface "${iface}" \
+  -config "${config}" \
+  -xdp-mode "${xdp_mode}" \
+  -metrics "${metrics_addr}"
